@@ -18,19 +18,14 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-
-	    "github.com/samalba/dockerclient"
-  "regexp"
-	"strings"
+	"github.com/samalba/dockerclient"
 	"github.com/spf13/cobra"
 	"os/exec"
-
-		"os/signal"
-		"syscall"
-
-    // "bufio"
-    // "io/ioutil"
-    "os"
+	"regexp"
+	"strings"
+	"os/signal"
+	"syscall"
+	"os"
 )
 
 var docker *dockerclient.DockerClient
@@ -51,15 +46,10 @@ to quickly create a Cobra application.`,
 		docker = dc
 
 		updateDNSMasq()
-
-
-	 	docker.StartMonitorEvents(eventCallback, nil)
-
+		docker.StartMonitorEvents(eventCallback, nil)
 		waitForInterrupt()
 	},
 }
-
-
 
 func init() {
 	RootCmd.AddCommand(listenCmd)
@@ -76,16 +66,14 @@ func init() {
 
 }
 
-
 func updateDNSMasq() {
 	// Get only running containers
 	containers, err := docker.ListContainers(false, false, "")
 	if err != nil {
-		 log.Fatal(err)
+		log.Fatal(err)
 	}
 
-
-	f, err := os.OpenFile("/etc/dnsmasq.d/docker.conf", os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0744)
+	f, err := os.OpenFile("/etc/dnsmasq.d/docker.conf", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0744)
 	if err != nil {
 		panic(err)
 	}
@@ -98,35 +86,33 @@ func updateDNSMasq() {
 	restartDNS()
 }
 
-
-func containerDomain(container dockerclient.Container) string{
+func containerDomain(container dockerclient.Container) string {
 	info, _ := docker.InspectContainer(container.Id)
 	regex, _ := regexp.Compile(`VIRTUAL_HOST=([^\s]+)`)
 	res := regex.FindStringSubmatch(strings.Join(info.Config.Env, " "))
 
 	domain := ""
-	if(res != nil) {
+	if res != nil {
 		domain = res[1]
 	}
 	return domain
 }
 
-func containerIP(container dockerclient.Container) string{
+func containerIP(container dockerclient.Container) string {
 	var ip string
 
-  for _, n := range container.NetworkSettings.Networks {
- 	 ip = n.IPAddress
- 	 break
-  }
+	for _, n := range container.NetworkSettings.Networks {
+		ip = n.IPAddress
+		break
+	}
 	return ip
 }
 
-
 func dnsmasqConfig(container dockerclient.Container) string {
-	ip :=  containerIP(container)
+	ip := containerIP(container)
 	domain := containerDomain(container)
 
-	if(ip != "" && domain != "") {
+	if ip != "" && domain != "" {
 		return fmt.Sprintf("address=/%s/%s\n", domain, ip)
 	}
 
@@ -141,17 +127,13 @@ func restartDNS() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("in all caps: %q\n", out.String())
+	fmt.Printf("Restarted DNSMasq: %q\n", out.String())
 }
-
 
 // Callback used to listen to Docker's events
 func eventCallback(event *dockerclient.Event, ec chan error, args ...interface{}) {
-    log.Printf("Received event: %s\n", event.Status)
-		updateDNSMasq()
+	updateDNSMasq()
 }
-
-
 
 func waitForInterrupt() {
 	sigChan := make(chan os.Signal, 1)
