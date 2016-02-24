@@ -15,7 +15,6 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"github.com/samalba/dockerclient"
@@ -26,9 +25,11 @@ import (
 	"os/signal"
 	"syscall"
 	"os"
+	"time"
 )
 
 var docker *dockerclient.DockerClient
+var updated = true
 
 // listenCmd represents the listen command
 var listenCmd = &cobra.Command{
@@ -47,6 +48,25 @@ to quickly create a Cobra application.`,
 
 		updateDNSMasq()
 		docker.StartMonitorEvents(eventCallback, nil)
+
+
+		ticker := time.NewTicker(5 * time.Second)
+		quit := make(chan struct{})
+		go func() {
+		    for {
+		       select {
+		        case <- ticker.C:
+		            // do stuff
+								if(updated) {
+									updateDNSMasq()
+								}
+		        case <- quit:
+		            ticker.Stop()
+		            return
+		        }
+		    }
+		 }()
+
 		waitForInterrupt()
 	},
 }
@@ -121,18 +141,17 @@ func dnsmasqConfig(container dockerclient.Container) string {
 
 func restartDNS() {
 	cmd := exec.Command("systemctl", "restart", "dnsmasq")
-	var out bytes.Buffer
-	cmd.Stdout = &out
 	err := cmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Restarted DNSMasq: %q\n", out.String())
+	fmt.Printf("Restarted DNSMasq\n")
+	updated = false
 }
 
-// Callback used to listen to Docker's events
+
 func eventCallback(event *dockerclient.Event, ec chan error, args ...interface{}) {
-	updateDNSMasq()
+	updated = true
 }
 
 func waitForInterrupt() {
