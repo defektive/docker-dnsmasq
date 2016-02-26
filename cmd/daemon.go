@@ -1,16 +1,22 @@
-// Copyright © 2016 NAME HERE <EMAIL ADDRESS>
+// Copyright © 2016 defektive <sirbradleyd@gmail.com>
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 
 package cmd
 
@@ -28,22 +34,20 @@ import (
 	"time"
 )
 
+
 var docker *dockerclient.DockerClient
 var updated = true
-
-// listenCmd represents the listen command
-var listenCmd = &cobra.Command{
-	Use:   "listen",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+var dockerSocketPath string
+var dnsmasqConfigPath string
+// daemonCmd represents the daemon command
+var daemonCmd = &cobra.Command{
+	Use:   "daemon",
+	Short: "Update dnsmasq config when containers start and stop.",
+	Long: `Listen to docker events. Add/remove dnsmasq entries when containers
+	start or stop. Then restart dnsmasq. `,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		dc, _ := dockerclient.NewDockerClient("unix:///var/run/docker.sock", nil)
+		dc, _ := dockerclient.NewDockerClient(dockerSocketPath, nil)
 		docker = dc
 
 		updateDNSMasq()
@@ -72,19 +76,13 @@ to quickly create a Cobra application.`,
 }
 
 func init() {
-	RootCmd.AddCommand(listenCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// listenCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// listenCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	RootCmd.AddCommand(daemonCmd)
+	RootCmd.PersistentFlags().StringVarP(&dockerSocketPath, "docker-socket", "d", "unix:///var/run/docker.sock", "path to docker socket")
+	RootCmd.PersistentFlags().StringVarP(&dnsmasqConfigPath, "dnsmasq-config", "c", "/etc/dnsmasq.d/docker.conf", "path to dnsmasq config file (this file should be empty)")
 
 }
+
+
 
 func updateDNSMasq() {
 	// Get only running containers
@@ -93,7 +91,7 @@ func updateDNSMasq() {
 		log.Fatal(err)
 	}
 
-	f, err := os.OpenFile("/etc/dnsmasq.d/docker.conf", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0744)
+	f, err := os.OpenFile(dnsmasqConfigPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0744)
 	if err != nil {
 		panic(err)
 	}
