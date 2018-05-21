@@ -30,15 +30,20 @@ import (
 	"strings"
 	"os/signal"
 	"syscall"
-	"os"
 	"time"
+	"os"
+	"runtime"
+	"net"
+	"crypto/tls"
 )
-
 
 var docker *dockerclient.DockerClient
 var updated = true
 var dockerSocketPath string
 var dnsmasqConfigPath string
+var dnsmasqRestartCommand string
+var dockerMachineIp string
+var dockerTlsPath string
 // daemonCmd represents the daemon command
 var daemonCmd = &cobra.Command{
 	Use:   "daemon",
@@ -46,30 +51,36 @@ var daemonCmd = &cobra.Command{
 	Long: `Listen to docker events. Add/remove dnsmasq entries when containers
 	start or stop. Then restart dnsmasq. `,
 	Run: func(cmd *cobra.Command, args []string) {
-
-		dc, _ := dockerclient.NewDockerClient(dockerSocketPath, nil)
+		var cert *tls.Config
+		var err error
+		if dockerTlsPath!=""{
+			cert, err = dockerclient.TLSConfigFromCertPath(dockerTlsPath)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+		dc, _ := dockerclient.NewDockerClient(dockerSocketPath, cert)
 		docker = dc
 
 		updateDNSMasq()
 		docker.StartMonitorEvents(eventCallback, nil)
 
-
 		ticker := time.NewTicker(5 * time.Second)
 		quit := make(chan struct{})
 		go func() {
-		    for {
-		       select {
-		        case <- ticker.C:
-		            // do stuff
-								if(updated) {
-									updateDNSMasq()
-								}
-		        case <- quit:
-		            ticker.Stop()
-		            return
-		        }
-		    }
-		 }()
+			for {
+				select {
+				case <-ticker.C:
+					// do stuff
+					if (updated) {
+						updateDNSMasq()
+					}
+				case <-quit:
+					ticker.Stop()
+					return
+				}
+			}
+		}()
 
 		waitForInterrupt()
 	},
@@ -79,11 +90,14 @@ func init() {
 	RootCmd.AddCommand(daemonCmd)
 	daemonCmd.PersistentFlags().StringVarP(&dockerSocketPath, "docker-socket", "d", "unix:///var/run/docker.sock", "path to docker socket")
 	daemonCmd.PersistentFlags().StringVarP(&dnsmasqConfigPath, "dnsmasq-config", "c", "/etc/dnsmasq.d/docker.conf", "path to dnsmasq config file (this file should be empty)")
-
+	daemonCmd.PersistentFlags().StringVarP(&dnsmasqRestartCommand, "daemon-restart", "r", "systemctl restart dnsmasq", "command to restart dnsmasq")
+	daemonCmd.PersistentFlags().StringVarP(&dockerMachineIp, "docker-machine-ip", "m", "192.168.99.100", "set ip of docker machine")
+	daemonCmd.PersistentFlags().StringVarP(&dockerTlsPath, "docker-tls-path", "t", "", "set tls path for docker api")
 }
-
-
-
+func defaultDockerMachineIp() string {
+	output, _ := exec.Command("docker-machine", "ip").Output()
+	return strings.TrimSuffix(string(output), "\n")
+}
 func updateDNSMasq() {
 	// Get only running containers
 	containers, err := docker.ListContainers(false, false, "")
@@ -98,6 +112,9 @@ func updateDNSMasq() {
 
 	for _, c := range containers {
 		f.WriteString(dnsmasqConfig(c))
+		if runtime.GOOS == "darwin" {
+			addDockerRoute(c)
+		}
 	}
 
 	f.Close()
@@ -118,7 +135,6 @@ func containerDomain(container dockerclient.Container) string {
 
 func containerIP(container dockerclient.Container) string {
 	var ip string
-
 	for _, n := range container.NetworkSettings.Networks {
 		ip = n.IPAddress
 		break
@@ -137,16 +153,28 @@ func dnsmasqConfig(container dockerclient.Container) string {
 	return ""
 }
 
+func addDockerRoute(container dockerclient.Container) {
+	subnet := net.ParseIP(containerIP(container)).Mask(net.CIDRMask(16, 32)).String()
+	err := exec.Command("/bin/sh", "-c", fmt.Sprintf("route delete %s/16 %s", subnet, dockerMachineIp)).Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = exec.Command("/bin/sh", "-c", fmt.Sprintf("route add %s/16 %s", subnet, dockerMachineIp)).Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(fmt.Sprintf("added %s/16 -> %s", subnet, dockerMachineIp))
+}
+
 func restartDNS() {
-	cmd := exec.Command("systemctl", "restart", "dnsmasq")
+	cmd := exec.Command("/bin/sh", "-c", dnsmasqRestartCommand)
 	err := cmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Restarted DNSMasq\n")
+	log.Println("restarted DNSMasq")
 	updated = false
 }
-
 
 func eventCallback(event *dockerclient.Event, ec chan error, args ...interface{}) {
 	updated = true
